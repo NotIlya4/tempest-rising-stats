@@ -1,0 +1,12 @@
+# Always LF in the repository, whatever the local machine's settings are.
+# Otherwise Windows and Linux produce different diffs and history fills up with line-ending noise.
+* text=auto eol=lf
+
+# Windows batch files want CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never touch images: the game icons in web/icons/ are committed binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary

@@ -1,0 +1,20 @@
+{
+  "name": "tempest-rising-data",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tempest Rising unit stats from the game files, with an offline page for sorting, filtering and comparing",
+  "scripts": {
+    "extract": "node extractor/extract.mjs",
+    "build": "node tools/build-web-data.mjs",
+    "build:public": "node tools/build-web-data.mjs && node tools/build-public.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "smoke": "node tools/smoke.mjs",
+    "uitest": "node tools/uitest.mjs",
+    "probe": "node tools/probe.mjs",
+    "check": "npm run build && npm test && npm run smoke && npm run uitest"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

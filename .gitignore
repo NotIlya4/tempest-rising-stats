@@ -1,0 +1,32 @@
+# Build artifacts: restored by npm run build from data/units.json and web/lib/calc.js,
+# which are in git.
+web/data.js
+web/lib/calc.global.js
+web/config.js
+
+# Public build for GitHub Pages (npm run build:public) — deployed by CI, not committed
+dist/
+
+# Misc
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.probe-profile/
+# temporary page copies left behind by browser tests
+web/_*.html
+
+# Old local extraction scratch folder
+gamedata/
+
+# Game-file extractor: never commit keys, mappings, Oodle, exports or build output
+extractor/out/
+extractor/**/bin/
+extractor/**/obj/
+extractor/**/*.usmap
+extractor/**/aes-key*.txt
+extractor/**/oo2core*.dll
+extractor/**/oodle*.dll
+
+# Local helper tools that are never published.
+extractor/keyscan/

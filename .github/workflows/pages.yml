@@ -1,0 +1,58 @@
+# Publishing to GitHub Pages.
+#
+# What lives where:
+#   data/units.json  — in git: generated from the game files by `npm run extract`
+#                      (needs a copy of the game, which CI does not have) and committed
+#                      after review; its diff is "what changed in the game".
+#   web/icons/       — in git: the game icons the data references (written by the same step).
+#   web/data.js, dist/ — build artifacts, built here and sent straight to Pages,
+#                      bypassing repository history.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'data/**', 'tools/**', 'tests/**', 'extractor/lib/**', 'package.json', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Build first: tests compare the generated calc.global.js with calc.js.
+      - name: Build public site
+        run: npm run build:public
+        env:
+          TR_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+
+      - name: Test
+        run: npm test
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

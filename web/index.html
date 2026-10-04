@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tempest Rising — unit stats database</title>
+<meta name="description" content="Tempest Rising unit stats: HP, armor, weapons, DPS and time-to-kill for GDF, Dynasty and Veti, with sorting, filters and a comparison calculator.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e1116'/%3E%3Cpath d='M9 8h14v4h-5v12h-4V12H9z' fill='%234a9eff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0e1116;
+    --bg2: #161b22;
+    --bg3: #1f2530;
+    --line: #2b3340;
+    --fg: #e6edf3;
+    --fg2: #8b98a9;
+    --accent: #4a9eff;
+    --gdf: #4a9eff;
+    --dynasty: #ff6b4a;
+    --veti: #b06bff;
+    --neutral: #8b98a9;
+    --good: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --radius: 6px;
+    --radius-lg: 8px;
+    --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --fs-small: 12px;
+    --fs-base: 13px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 var(--font);
+  }
+  code, .mono { font-family: "Cascadia Code", Consolas, monospace; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  /* Numbers use the same font as the text, but with tabular digits: columns
+     line up, and headers and cells don't jump between two typefaces. */
+  .num, .stat .v, table.cmp td.val { font-variant-numeric: tabular-nums; }
+
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--bg2); border-bottom: 1px solid var(--line);
+    padding: 10px 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  h1 small { color: var(--fg2); font-weight: 400; font-size: 12px; }
+
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    background: none; border: 1px solid transparent; color: var(--fg2);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg3); }
+  .tab.active { color: var(--fg); background: var(--bg3); border-color: var(--line); }
+
+  .variant-switch { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .variant-switch button {
+    background: var(--bg3); border: 0; border-right: 1px solid var(--line);
+    color: var(--fg2); padding: 6px 14px; cursor: pointer; font-size: 13px;
+  }
+  .variant-switch button:last-child { border-right: 0; }
+
+  /* Sub-rows under a unit: one per weapon, cells aligned with their columns.
+     Thin and muted so they don't compete with the main row, while the highlighted
+     winning weapon still reads at a glance. */
+  tr.wsub-row td { background: var(--bg2); border-top: 0; color: var(--fg2); font-size: 12px; padding-top: 2px; padding-bottom: 2px; }
+  tr.wsub-row td.num { text-align: right; }
+  tr.wsub-row.win td { background: var(--bg3); color: var(--fg); }
+  tr.wsub-row .wsub-name { text-align: left; padding-left: 30px; }
+  tr.wsub-row .wsub-name b { font-weight: 600; }
+  /* The .wsub-hint and .wsub-mark rules were removed along with their markup: the sort
+     label moved into a tooltip, and the weapon details into the cell's title.
+     Highlighting the weapon the sort was based on stays: the whole row
+     gets a background (rule above), and the arrow next to the name is a short marker. */
+  tr.wsub-row.win .wsub-name b::after { content: ' ◂'; color: var(--accent); }
+
+  /* A value the game data does not give ("—" / "?"): the tooltip says why. */
+  .unknown { cursor: help; }
+  /* a value that does not apply to the entity (not unknown): plain dash, reason in the tooltip */
+  .na { cursor: help; color: var(--fg2); }
+  td.unknown { color: var(--warn); text-decoration: underline dotted; text-underline-offset: 3px; }
+
+  /* Unit type checkboxes: several can be selected at once. */
+  .check-group { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .check-group label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg2); cursor: pointer; white-space: nowrap; }
+  .check-group label.off { opacity: .4; }
+  .check-group input { cursor: pointer; margin: 0; }
+  .check-group b { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+
+  /* Type chips: the checkbox is hidden, the whole label is the toggle. */
+  .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--bg2); color: var(--fg2); font-size: var(--fs-base);
+    cursor: pointer; user-select: none;
+  }
+  .chip input { position: absolute; opacity: 0; pointer-events: none; }
+  .chip:hover { color: var(--fg); border-color: var(--accent); }
+  .chip:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #06101d; font-weight: 600; }
+  .chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  label.field { display: inline-flex; align-items: center; gap: 8px; color: var(--fg2); font-size: var(--fs-base); }
+
+  .mini-check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg2); cursor: pointer; user-select: none; }
+  .mini-check input { cursor: pointer; }
+
+  /* Unit name: Russian as the main line, English as a small line beneath it.
+     Most units have a Russian name; for the rest there's a single line. */
+  .name-cell { display: flex; flex-direction: column; line-height: 1.2; }
+  .name-ru { color: var(--fg); }
+  .name-en { font-size: 11px; color: var(--fg2); }
+
+  /* Header of a column whose values depend on the selected target. */
+  th.armed { color: var(--accent); }
+
+  /* Comparing N units. Metrics as rows, units as columns. */
+  .cmp-actions { display: flex; gap: 6px; align-items: flex-end; }
+  .btn {
+    background: var(--bg3); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--fg2); padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  .btn:hover { color: var(--fg); border-color: var(--accent); }
+  .btn-quiet { background: none; color: var(--fg2); font-size: 12px; padding: 4px 9px; }
+
+  /* “More info” toggle: when pressed, expands the economy columns. */
+  .extra-toggle { border-color: transparent; }
+  .extra-toggle:hover { border-color: var(--line); }
+  .extra-toggle.on { color: var(--accent); border-color: var(--accent); }
+  /* The compare table is brought in line with the other tables: same cell padding,
+     sticky header on --bg3, monospaced right-aligned numbers and
+     a .table-wrap container with border and rounding. It used to have its own
+     rule set (5px instead of 6px, digits without the monospaced font, no border),
+     and next to the arsenal it looked like a different page. */
+  .cmp-wrap { width: fit-content; max-width: 100%; overflow: auto; max-height: calc(100vh - 140px); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+  table.cmp { width: auto; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+  table.cmp col.metric-col { width: 190px; }
+  table.cmp col.unit-col { width: 250px; }
+  table.cmp thead th.col-unit { vertical-align: top; padding: 10px; }
+  .cmp-unit { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .cmp-unit .picker { flex: 1; min-width: 0; }
+  .cmp-unit .pic-box { flex: 0 0 auto; }
+  table.cmp thead th.col-unit select { width: 100%; }
+  table.cmp td.chips .eff-list, table.cmp td.chips .tgt-list { align-items: center; }
+  table.cmp td.ghost { background: transparent; }
+  table.cmp th.col-ghost { vertical-align: middle; text-align: center; }
+  .cmp-add-slot {
+    width: 100%; padding: 18px 10px; background: none; color: var(--fg2); font-size: var(--fs-base);
+    border: 1px dashed var(--line); border-radius: var(--radius); cursor: pointer;
+  }
+  .cmp-add-slot:hover { color: var(--accent); border-color: var(--accent); }
+  table.cmp th, table.cmp td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.cmp thead th { position: sticky; top: 0; background: var(--bg3); text-align: left;
+    vertical-align: bottom; font-weight: 600; z-index: 2; }
+  table.cmp thead th.col-unit { border-bottom: 2px solid var(--line); }
+  table.cmp td.metric { color: var(--fg2); font-size: 12.5px; white-space: nowrap; }
+  table.cmp td.val { text-align: center; white-space: nowrap; }
+  table.cmp tr.group td { background: var(--bg2); color: var(--fg2); font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .05em; padding-top: 12px; }
+  table.cmp td.best { color: var(--good); font-weight: 600; background: rgba(63, 185, 80, .12); }
+  table.cmp td.worst { color: var(--bad); }
+  .cmp-pick { display: flex; gap: 6px; align-items: center; }
+  .cmp-pick select { min-width: 150px; }
+  .cmp-remove { background: none; border: 1px solid var(--line); border-radius: 5px;
+    color: var(--fg2); cursor: pointer; padding: 4px 7px; line-height: 1; }
+  .cmp-remove:hover { color: var(--bad); border-color: var(--bad); }
+
+  /* Unit search instead of a list with every unit: a field with suggestions. */
+  .picker { position: relative; display: inline-block; min-width: 210px; }
+  .picker-input {
+    width: 100%; box-sizing: border-box; background: var(--bg3); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 24px 6px 9px;
+    font-size: 13px; font-family: inherit;
+  }
+  .picker-input:focus { outline: none; border-color: var(--accent); }
+  .picker-clear {
+    position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+    background: none; border: 0; color: var(--fg2); cursor: pointer; font-size: 14px;
+    line-height: 1; padding: 3px 5px;
+  }
+  .picker-clear:hover { color: var(--fg); }
+  .picker-pop {
+    position: absolute; z-index: 40; top: calc(100% + 3px); left: 0; right: 0;
+    max-height: 260px; overflow-y: auto; background: var(--bg2);
+    border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  .picker-item {
+    display: flex; align-items: center; gap: 7px; padding: 5px 9px; cursor: pointer;
+    font-size: 12.5px; border-bottom: 1px solid var(--line);
+  }
+  .picker-item:last-child { border-bottom: 0; }
+  .picker-item:hover, .picker-item.on { background: var(--bg3); }
+  .picker-item .p-name { white-space: nowrap; }
+  .picker-item .p-en { color: var(--fg2); font-size: 11px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .picker-item .p-tag { margin-left: auto; color: var(--fg2); font-size: 11px; white-space: nowrap; }
+  .picker-empty { padding: 8px 10px; color: var(--fg2); font-size: 12px; }
+  .picker-slot label { display: block; margin-bottom: 4px; }
+  .variant-switch button.active { background: var(--accent); color: #06101d; font-weight: 600; }
+  .variant-switch button:not(:disabled):hover:not(.active) { color: var(--fg); }
+
+  .spacer { flex: 1; }
+  .meta { color: var(--fg2); font-size: 12px; }
+
+  main { padding: 16px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .controls {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  input[type=search], select {
+    background: var(--bg2); border: 1px solid var(--line); color: var(--fg);
+    padding: 6px 10px; border-radius: 6px; font-size: 13px;
+  }
+  input[type=search] { min-width: 240px; }
+  #q { min-width: 320px; }
+  label.chk { display: flex; align-items: center; gap: 5px; color: var(--fg2); font-size: 13px; cursor: pointer; }
+
+  .table-wrap { overflow: auto; max-height: calc(100vh - 168px); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  /* Vertical separators: with many numeric columns the eye needs a rail to stay in one column. */
+  #arsenalTable th + th, #arsenalTable td + td, table.cmp th + th, table.cmp td + td,
+  .card-weapons th + th, .card-weapons td + td { border-left: 1px solid rgba(139, 152, 169, .14); }
+  th {
+    position: sticky; top: 0; background: var(--bg3); z-index: 2;
+    cursor: pointer; user-select: none; font-weight: 600;
+  }
+  th:hover { color: var(--accent); }
+  th.sorted::after { content: " ▾"; color: var(--accent); }
+  th.sorted.asc::after { content: " ▴"; }
+  td.num, th.num { text-align: right; }
+
+  /* Effect filter: a dropdown that looks like the faction select, with a search
+     field and a checkable list. Selected effects show up as removable chips. */
+  .dropdown { position: relative; }
+  .select-btn {
+    background: var(--bg2); border: 1px solid var(--line); color: var(--fg);
+    padding: 6px 28px 6px 10px; border-radius: var(--radius); font-size: var(--fs-base);
+    cursor: pointer; position: relative; font-family: inherit;
+  }
+  .select-btn::after { content: '▾'; position: absolute; right: 10px; color: var(--fg2); }
+  .select-btn:hover, .select-btn[aria-expanded="true"] { border-color: var(--accent); }
+  .dropdown-pop {
+    position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; width: 320px;
+    background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius-lg);
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); padding: 8px;
+  }
+  .dropdown-pop[hidden] { display: none; }
+  .dropdown-pop input[type=search] { width: 100%; min-width: 0; margin-bottom: 6px; }
+  .dropdown-list { max-height: 320px; overflow-y: auto; }
+  .dropdown-item {
+    display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px;
+    font-size: var(--fs-base); cursor: pointer;
+  }
+  .dropdown-item:hover { background: var(--bg3); }
+  .dropdown-item input { margin: 0; cursor: pointer; }
+  .dropdown-item img { width: 16px; height: 16px; object-fit: contain; flex: 0 0 16px; }
+  .dropdown-item .count { margin-left: auto; color: var(--fg2); font-size: var(--fs-small); font-variant-numeric: tabular-nums; }
+  .dropdown-empty { padding: 8px; color: var(--fg2); font-size: var(--fs-small); }
+  .chip.removable { gap: 6px; padding-right: 6px; background: var(--bg3); color: var(--fg); cursor: default; }
+  .chip.removable img { width: 14px; height: 14px; object-fit: contain; }
+  .chip.removable button {
+    background: none; border: 0; color: var(--fg2); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px;
+  }
+  .chip.removable button:hover { color: var(--bad); }
+
+  /* Weapon effects and unit auras.
+     Key point: values are STACKED, not inline. Inline, three effects
+     stretched the name column to a third of the screen and pushed the whole table sideways.
+     A vertical list takes one label's width, and its height is as many lines
+     as there are values. */
+  .eff-list { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+  .eff-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 6px 1px 3px; border: 1px solid var(--line); border-radius: 20px;
+    background: var(--bg3); font-size: 11px; line-height: 1.5; white-space: nowrap;
+  }
+  .eff-chip img { width: 14px; height: 14px; object-fit: contain; flex: 0 0 14px; }
+  .eff-chip.no-icon { padding-left: 6px; color: var(--fg2); }
+  .eff-chip:hover { border-color: var(--accent); }
+  /* What the weapon can shoot at. More muted than effects: targets are reference info, not an effect. */
+  .tgt-chip {
+    padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px;
+    background: none; font-size: 10.5px; line-height: 1.4; color: var(--fg2);
+    text-transform: lowercase; white-space: nowrap;
+  }
+  /* Target stack — same as effects: two labels side by side didn't fit. */
+  .tgt-list { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+
+  /* Unit card tiles: effects, doctrines and abilities in a grid that uses the
+     card's width. Same surface as the stat tiles at the top of the card. */
+  .tile-group { margin: 8px 0 14px; }
+  .tile-group h4 { margin: 0 0 6px; font-size: var(--fs-small); font-weight: 600; color: var(--fg2); }
+  /* align-items: start — a short tile keeps its own height instead of stretching
+     to the longest one in its row and turning into an empty box. */
+  .tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; align-items: start; }
+  .tile {
+    background: var(--bg3); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  }
+  .tile-head { display: flex; align-items: center; gap: 10px; }
+  .tile-icon {
+    flex: 0 0 32px; width: 32px; height: 32px; object-fit: contain;
+    background: var(--bg2); border-radius: var(--radius); padding: 2px;
+  }
+  .tile-icon.no-pic { display: grid; place-items: center; font-size: 14px; color: var(--fg2); }
+  .tile-title { font-weight: 600; font-size: var(--fs-base); line-height: 1.3; }
+  .tile-text { color: var(--fg2); font-size: 12.5px; line-height: 1.5; white-space: pre-line; }
+  .tile-meta { color: var(--accent); font-size: var(--fs-small); margin-top: auto; }
+  /* Compact tiles (effects, auras, doctrines): one line, several per row; the
+     description is a popover on hover or keyboard focus. */
+  .tile-grid:has(> .tile.compact) { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .tile.compact { position: relative; padding: 6px 10px; cursor: help; }
+  .tile.compact .tile-icon { flex-basis: 24px; width: 24px; height: 24px; }
+  .tile.compact:hover, .tile.compact:focus-visible { border-color: var(--accent); outline: none; }
+  .tile-pop {
+    display: none; position: absolute; z-index: 30; left: 0; top: calc(100% + 6px);
+    width: max(100%, 320px); max-width: 420px; padding: 10px 12px;
+    background: var(--bg2); border: 1px solid var(--accent); border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0,0,0,.5); color: var(--fg); font-size: 12.5px; line-height: 1.5;
+    white-space: pre-line; cursor: auto;
+  }
+  .tile.compact:hover .tile-pop, .tile.compact:focus-within .tile-pop { display: block; }
+  dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 6px 0; font-size: var(--fs-base); }
+  dl.facts dt { color: var(--fg2); }
+  dl.facts dd { margin: 0; }
+
+  /* Color highlights for the key numbers: damage and DPS red, HP green.
+     The color carries meaning rather than decoration: scrolling the table, the eye immediately
+     finds the row instead of reading every column in turn. */
+  td.hp-cell { color: var(--good); }
+  td.dmg-cell { color: var(--bad); }
+  tr.wsub-row td.dmg-cell { color: var(--bad); opacity: .85; }
+  tbody tr:hover { background: var(--bg2); }
+  tbody tr.clickable { cursor: pointer; }
+
+  .f-GDF { color: var(--gdf); }
+  .f-Dynasty { color: var(--dynasty); }
+  .f-Veti { color: var(--veti); }
+  .f-Neutral, .f-Unknown { color: var(--neutral); }
+
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 11px; background: var(--bg3); color: var(--fg2); border: 1px solid var(--line);
+  }
+  .badge.t1 { border-color: #2d4a6b; color: #6cb6ff; }
+  .badge.t2 { border-color: #4a3a6b; color: #b794ff; }
+  .badge.t3 { border-color: #6b4a2d; color: #ffa657; }
+  .badge.util { border-color: #5b532d; color: #e3b341; }
+
+  .armor-bar { display: inline-block; width: 44px; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; vertical-align: middle; }
+  .armor-bar > i { display: block; height: 100%; background: var(--accent); }
+
+  dialog {
+    background: var(--bg2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 0; max-width: 1240px; width: 96vw;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.65); }
+  .dlg-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg2);
+  }
+  .dlg-head h2 { margin: 0; font-size: 18px; }
+  .dlg-body { padding: 18px; overflow: auto; max-height: 80vh; }
+  .dlg-close { margin-left: auto; background: none; border: 0; color: var(--fg2); font-size: 22px; cursor: pointer; line-height: 1; }
+  .dlg-close:hover { color: var(--fg); }
+
+  /* Weapons table in the card: 12+ columns don't fit the window, so it
+     scrolls horizontally inside its own container. The table used to be
+     a plain child of .dlg-body and slid sideways, stretching the whole dialog. */
+  .dlg-body .table-wrap { max-height: none; overflow-x: auto; }
+  /* The card's weapon table reuses the arsenal's weapon rows; here they are the
+     main content, so they get normal text instead of the muted sub-row look. */
+  .card-weapons tr.wsub-row td { background: none; color: var(--fg); font-size: var(--fs-base); padding: 6px 10px; }
+  .card-weapons tr.wsub-row .wsub-name { padding-left: 10px; }
+  .card-weapons tr.wsub-row td.dmg-cell { color: var(--bad); }
+  .dlg-body table { white-space: nowrap; }
+  .dlg-body table th:first-child, .dlg-body table td:first-child { position: sticky; left: 0; z-index: 1; }
+  .dlg-body table th:first-child { background: var(--bg3); }
+
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 10px; margin: 14px 0; }
+  .stat { background: var(--bg3); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .stat .k { color: var(--fg2); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  .stat .v { font-size: 17px; font-weight: 600; }
+  .stat .sub { color: var(--fg2); font-size: 11px; }
+
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--fg2); margin: 20px 0 8px; }
+  .note { color: var(--fg2); font-size: 12px; margin: 6px 0; }
+  .warn-box { background: #2a1f1f; border: 1px solid #5b2d2d; border-radius: 6px; padding: 10px 12px; margin: 10px 0; font-size: 12px; }
+  ul.tight { margin: 6px 0; padding-left: 20px; color: var(--fg2); font-size: var(--fs-small); }
+  ul.tight li { margin: 2px 0; }
+  ul.tight b { color: var(--fg); font-weight: 600; }
+  .calc-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+  .calc-row > div { display: flex; flex-direction: column; gap: 4px; }
+  .calc-row label { font-size: 11px; color: var(--fg2); text-transform: uppercase; letter-spacing: .4px; }
+  .empty { padding: 40px; text-align: center; color: var(--fg2); }
+
+  /* ── images ── */
+  .pic { display: block; image-rendering: auto; }
+  .pic-24 { width: 24px; height: 24px; }
+  .pic-32 { width: 32px; height: 32px; }
+  /* Table icon: the game's 128 px unit icon shown at 36 px. */
+  .pic-36 { width: 36px; height: 36px; object-fit: contain; }
+  .pic-132 { width: 132px; height: 132px; object-fit: contain; }
+  .pic-box { border-radius: 4px; overflow: hidden; background: #0a0d12; display: inline-flex; }
+  .pic-empty {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg3); color: var(--fg2); font-weight: 700;
+    font-size: 12px; text-transform: uppercase;
+  }
+  .pic-hero-wrap { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 8px; }
+  .pic-empty.pic-36 { font-size: 16px; }
+  .pic-hero-wrap .pic-empty { width: 132px; height: 132px; font-size: 34px; border-radius: 8px; }
+  .unit-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .unit-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .unit-head .note { margin: 0; }
+  .badge-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  /* Unit name and its badges on one line. */
+  .name-row { display: inline-flex; align-items: center; gap: 8px; }
+  .site-footer {
+    padding: 6px 16px 10px; color: var(--fg2); font-size: 11px; line-height: 1.4;
+  }
+  .meta.count { white-space: nowrap; cursor: help; }
+  .pic-cell { padding: 2px 6px; width: 36px; }
+
+  @media (max-width: 720px) {
+    header { gap: 8px; padding: 8px 16px; }
+    header .spacer { display: none; }
+    .tabs, .variant-switch { flex-wrap: wrap; }
+    h1 small { display: block; }
+    .variant-switch button { padding: 5px 9px; font-size: 12px; }
+    input[type=search], #q { min-width: 0; width: 100%; }
+    .controls > select, .picker { flex: 1 1 140px; min-width: 0; }
+    .table-wrap { max-height: none; }
+    .pic-hero-wrap { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Tempest Rising <small id="srcInfo" data-i18n>loading…</small></h1>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-panel="arsenal" data-i18n>Arsenal</button>
+    <button class="tab" data-panel="compare" data-i18n>Compare</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="variant-switch" id="langSwitch" title="Interface language" data-i18n-title>
+    <button data-lang="en">EN</button>
+    <button data-lang="ru">RU</button>
+  </div>
+</header>
+
+<main>
+  <!-- ─── Arsenal ─── -->
+  <section class="panel active" id="panel-arsenal">
+    <div class="controls">
+      <input type="search" id="q" placeholder="Search by name, weapon, effect…" data-i18n-placeholder autocomplete="off">
+      <select id="fFaction">
+        <option value="" data-i18n>All factions</option>
+        <option value="GDF" data-i18n>GDF</option>
+        <option value="Dynasty" data-i18n>Dynasty</option>
+        <option value="Veti" data-i18n>Veti</option>
+      </select>
+      <div class="dropdown" id="effectDropdown">
+        <button id="toggleEffectFilter" class="select-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="Units that apply any of the selected effects with a weapon or carry them as an aura" data-i18n-title>Effects</button>
+        <div id="fEffectWrap" class="dropdown-pop" hidden>
+          <input id="fEffectSearch" type="search" placeholder="find effect…" data-i18n-placeholder autocomplete="off">
+          <div class="dropdown-list" id="fEffect" role="listbox" aria-multiselectable="true"></div>
+        </div>
+      </div>
+      <span class="chip-group" id="fEffectChips"></span>
+      <label class="field"><span data-i18n>Target</span><span class="picker" id="fTarget"></span></label>
+    </div>
+    <div class="controls">
+    <span class="chip-group" id="fClass" title="Unit type, several can be on; none means all" data-i18n-title></span>
+    <span class="spacer"></span>
+    <label class="chk" title="Hides the economy (harvesters, refineries), neutral and civilian map objects, mines and barrels, and what the game leaves out of its codex (campaign leftovers and variants)" data-i18n-title><input type="checkbox" id="hideSecondary" checked> <span data-i18n>Hide non-combat</span></label>
+    <button id="toggleExtra" class="btn btn-quiet extra-toggle" aria-expanded="false" title="Show economy columns: credits, Intel, build time, population" data-i18n-title>more info</button>
+    <span class="meta count" id="arsenalCount"></span>
+    <button id="resetFilters" class="btn btn-quiet" title="Clear all arsenal filters" data-i18n-title data-i18n>reset filters</button>
+    </div>
+    <div class="table-wrap"><table id="arsenalTable"></table></div>
+  </section>
+
+  <!-- ─── Compare ─── -->
+  <section class="panel" id="panel-compare">
+    <div class="controls">
+      <label class="field" title="Target for DPS and TTK" data-i18n-title><span data-i18n>Target</span><span class="picker" id="cmpTarget"></span></label>
+      <span class="meta" id="cmpStatus"></span>
+      <span class="spacer"></span>
+      <button id="cmpAdd" class="btn" title="Add another unit to compare" data-i18n-title data-i18n>+ unit</button>
+      <button id="cmpReset" class="btn btn-quiet" data-i18n>reset</button>
+    </div>
+    <div class="cmp-wrap"><div id="cmpOut"></div></div>
+  </section>
+</main>
+
+<footer class="site-footer" id="siteFooter"></footer>
+
+<dialog id="unitDialog">
+  <div class="dlg-head">
+    <h2 id="dlgTitle"></h2>
+    <button class="dlg-close" id="dlgClose" aria-label="Close" data-i18n-aria>&times;</button>
+  </div>
+  <div class="dlg-body" id="dlgBody"></div>
+</dialog>
+
+<script src="config.js"></script>
+<script src="lib/i18n.js"></script>
+<script src="data.js"></script>
+<script src="lib/calc.global.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
